@@ -140,6 +140,15 @@ def analyze():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/debug")
+def debug():
+    key = os.getenv("OPENAI_API_KEY", "")
+    return jsonify({
+        "key_set": bool(key),
+        "key_length": len(key),
+        "key_preview": key[:10] if key else "empty"
+    })
+
 @app.route("/api/history", methods=["GET"])
 def history():
     db = get_db()
