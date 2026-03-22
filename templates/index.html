@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>InstantValue AI</title>
+
+<!-- PWA -->
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0a0a0f">
+
+<!-- iOS ホーム画面追加対応 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="InstantValue">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<style>
+  :root {
+    --neon: #00ff9c;
+    --neon-dim: rgba(0,255,156,0.15);
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a28;
+    --text: #e8e8f0;
+    --text-dim: rgba(232,232,240,0.45);
+    --red: #ff4466;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; overflow-x: hidden; }
+
+  /* ── Fonts ── */
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;500;600;700&display=swap');
+
+  /* ── Layout ── */
+  .app { display: flex; flex-direction: column; height: 100vh; max-width: 480px; margin: 0 auto; position: relative; }
+
+  /* ── Nav tabs ── */
+  .nav { display: flex; background: var(--surface); border-top: 1px solid rgba(255,255,255,0.06); }
+  .nav-btn {
+    flex: 1; padding: 14px 0 10px; background: none; border: none; cursor: pointer;
+    color: var(--text-dim); font-size: 11px; letter-spacing: .5px; transition: color .2s;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .nav-btn svg { width: 22px; height: 22px; }
+  .nav-btn.active { color: var(--neon); }
+  .nav-btn.active svg { filter: drop-shadow(0 0 6px var(--neon)); }
+
+  /* ── Pages ── */
+  .page { flex: 1; overflow-y: auto; display: none; flex-direction: column; }
+  .page.active { display: flex; }
+
+  /* ════════════════════════════════════════
+     CAMERA PAGE
+  ════════════════════════════════════════ */
+  #page-camera { background: #000; position: relative; overflow: hidden; }
+
+  #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .cam-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+
+  /* Vignette */
+  .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,.7) 100%);
+  }
+
+  /* Scan frame */
+  .scan-frame {
+    position: relative; width: 260px; height: 260px; z-index: 2;
+  }
+  .scan-frame::before, .scan-frame::after,
+  .scan-frame .corner-br, .scan-frame .corner-bl {
+    content: ''; position: absolute; width: 32px; height: 32px;
+    border-color: var(--neon); border-style: solid;
+    transition: opacity .3s;
+    filter: drop-shadow(0 0 8px var(--neon));
+  }
+  .scan-frame::before  { top: 0;    left: 0;  border-width: 3px 0 0 3px; }
+  .scan-frame::after   { top: 0;    right: 0; border-width: 3px 3px 0 0; }
+  .scan-frame .corner-br { bottom: 0; right: 0; border-width: 0 3px 3px 0; }
+  .scan-frame .corner-bl { bottom: 0; left: 0;  border-width: 0 0 3px 3px; }
+
+  /* Scan line */
+  .scan-line {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--neon), transparent);
+    box-shadow: 0 0 12px 4px rgba(0,255,156,.5);
+    animation: scanMove 1.8s ease-in-out infinite;
+    opacity: 0;
+  }
+  .scanning .scan-line { opacity: 1; }
+  @keyframes scanMove {
+    0%   { top: 0; }
+    50%  { top: calc(100% - 2px); }
+    100% { top: 0; }
+  }
+
+  /* Rotating ring */
+  .scan-ring {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 310px; height: 310px; border-radius: 50%;
+    border: 1.5px dashed rgba(0,255,156,.2);
+    animation: spin 4s linear infinite;
+    opacity: 0; transition: opacity .4s;
+  }
+  .scanning .scan-ring { opacity: 1; }
+  @keyframes spin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+  /* Status label */
+  .scan-label {
+    position: absolute; bottom: 120px; left: 0; right: 0; text-align: center;
+    color: var(--neon); font-size: 13px; letter-spacing: 2px; font-weight: 600;
+    text-shadow: 0 0 12px var(--neon);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:.7} 50%{opacity:1} }
+
+  /* Top logo */
+  .cam-header {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+    padding: 16px 20px 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .logo-text {
+    font-family: 'Orbitron', sans-serif; font-size: 15px;
+    color: var(--neon); text-shadow: 0 0 12px var(--neon); font-weight: 700;
+  }
+
+  /* Shutter button */
+  .shutter-wrap {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+    display: flex; flex-direction: column; align-items: center;
+    padding-bottom: 32px; gap: 12px;
+  }
+  .shutter {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(0,255,156,.25) 0%, #000 100%);
+    border: 3px solid var(--neon);
+    box-shadow: 0 0 24px rgba(0,255,156,.5);
+    cursor: pointer; transition: transform .1s, box-shadow .1s;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .shutter:active { transform: scale(.93); }
+  .shutter svg { width: 36px; height: 36px; fill: var(--neon); }
+  .shutter.loading { border-color: #444; box-shadow: none; cursor: not-allowed; }
+  .shutter.loading svg { display: none; }
+  .shutter-hint { color: rgba(255,255,255,.45); font-size: 12px; letter-spacing: 1.2px; }
+
+  /* Spinner */
+  .spinner {
+    display: none; width: 36px; height: 36px;
+    border: 3px solid rgba(0,255,156,.2);
+    border-top-color: var(--neon);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  .loading .spinner { display: block; }
+
+  /* Analyzing overlay */
+  .analyze-overlay {
+    position: absolute; inset: 0; background: rgba(0,0,0,.7);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; z-index: 20;
+  }
+  .analyze-overlay.show { display: flex; }
+  .cube-spinner {
+    display: grid; grid-template-columns: repeat(3,16px); gap: 4px;
+  }
+  .cube-spinner div {
+    width: 16px; height: 16px; background: var(--neon); border-radius: 3px;
+    animation: cubeFade 1.2s ease-in-out infinite;
+  }
+  .cube-spinner div:nth-child(2) { animation-delay: .1s; }
+  .cube-spinner div:nth-child(3) { animation-delay: .2s; }
+  .cube-spinner div:nth-child(4) { animation-delay: .3s; }
+  .cube-spinner div:nth-child(5) { animation-delay: .4s; }
+  .cube-spinner div:nth-child(6) { animation-delay: .5s; }
+  .cube-spinner div:nth-child(7) { animation-delay: .6s; }
+  .cube-spinner div:nth-child(8) { animation-delay: .7s; }
+  .cube-spinner div:nth-child(9) { animation-delay: .8s; }
+  @keyframes cubeFade { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
+  .analyze-text {
+    font-family: 'Orbitron', sans-serif; color: var(--neon);
+    font-size: 13px; letter-spacing: 2px;
+  }
+
+  /* ════════════════════════════════════════
+     RESULT PAGE
+  ════════════════════════════════════════ */
+  #page-result { padding: 0 0 40px; background: var(--bg); }
+
+  .result-header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.06);
+    position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  .back-btn {
+    background: none; border: none; color: var(--neon); cursor: pointer;
+    display: flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 600;
+  }
+  .result-title {
+    font-family: 'Orbitron', sans-serif; color: var(--neon);
+    font-size: 15px; font-weight: 700;
+  }
+
+  .result-body { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+
+  /* Product header */
+  .product-header { display: flex; gap: 16px; align-items: flex-start; }
+  .product-thumb {
+    width: 90px; height: 90px; border-radius: 12px;
+    object-fit: cover; flex-shrink: 0;
+    background: var(--surface2); display: block;
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  .product-info { flex: 1; }
+  .category-badge {
+    display: inline-block; padding: 3px 8px; border-radius: 4px;
+    background: var(--neon-dim); color: var(--neon);
+    font-size: 11px; font-weight: 700; margin-bottom: 6px;
+  }
+  .product-name { font-size: 18px; font-weight: 700; line-height: 1.3; }
+
+  /* Price card */
+  .price-card {
+    background: linear-gradient(135deg, rgba(0,255,156,.08), rgba(0,85,51,.15));
+    border: 1px solid rgba(0,255,156,.2);
+    border-radius: 20px; padding: 28px 24px; text-align: center;
+  }
+  .price-label { color: var(--text-dim); font-size: 13px; letter-spacing: 1.5px; margin-bottom: 12px; }
+  .price-value {
+    font-family: 'Orbitron', sans-serif; font-size: 44px; font-weight: 900;
+    color: var(--neon); text-shadow: 0 0 28px var(--neon);
+    transition: none;
+  }
+  .price-range { color: rgba(255,255,255,.3); font-size: 13px; margin-top: 8px; }
+
+  /* Saved badge */
+  .saved-badge {
+    display: none; align-items: center; gap: 8px;
+    padding: 10px 16px; border-radius: 12px;
+    background: rgba(0,200,80,.12); border: 1px solid rgba(0,200,80,.3);
+    color: #00e676; font-size: 13px; font-weight: 600;
+    animation: fadeIn .4s ease;
+  }
+  .saved-badge.show { display: flex; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+
+  /* Tags */
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag {
+    padding: 5px 12px; border-radius: 20px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09);
+    color: rgba(255,255,255,.7); font-size: 12px;
+  }
+
+  /* Description */
+  .desc-section { display: flex; flex-direction: column; gap: 10px; }
+  .desc-header { display: flex; justify-content: space-between; align-items: center; }
+  .desc-label { color: rgba(255,255,255,.7); font-size: 14px; font-weight: 600; }
+  .copy-btn {
+    display: flex; align-items: center; gap: 4px;
+    color: var(--neon); background: none; border: none; cursor: pointer;
+    font-size: 13px; font-weight: 600;
+  }
+  .desc-box {
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px; padding: 16px;
+    color: rgba(255,255,255,.87); font-size: 14px; line-height: 1.7;
+  }
+
+  /* Export buttons */
+  .export-section { display: flex; flex-direction: column; gap: 12px; }
+  .export-title {
+    font-family: 'Orbitron', sans-serif; color: rgba(255,255,255,.6);
+    font-size: 13px; letter-spacing: 1.5px;
+  }
+  .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .export-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 14px; border-radius: 12px; cursor: pointer;
+    background: linear-gradient(135deg, rgba(0,255,156,.08), rgba(255,255,255,.03));
+    border: 1px solid rgba(0,255,156,.18);
+    color: rgba(255,255,255,.87); font-size: 14px; font-weight: 600;
+    transition: background .2s, transform .1s;
+  }
+  .export-btn:active { transform: scale(.97); }
+  .export-btn:hover { background: rgba(0,255,156,.14); }
+  .export-emoji { font-size: 18px; }
+
+  /* ════════════════════════════════════════
+     HISTORY PAGE
+  ════════════════════════════════════════ */
+  #page-history { background: var(--bg); padding: 0 0 20px; }
+
+  .hist-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 20px 12px; position: sticky; top: 0;
+    background: var(--bg); z-index: 5;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .hist-title-wrap { display: flex; flex-direction: column; gap: 2px; }
+  .hist-title { font-family: 'Orbitron', sans-serif; color: var(--neon); font-size: 15px; }
+  .hist-count { color: var(--text-dim); font-size: 11px; }
+  .hist-actions { display: flex; gap: 8px; }
+  .icon-btn {
+    background: none; border: none; cursor: pointer; color: rgba(255,255,255,.4);
+    padding: 6px; border-radius: 8px; transition: color .2s;
+  }
+  .icon-btn:hover { color: rgba(255,255,255,.7); }
+  .icon-btn svg { width: 20px; height: 20px; }
+
+  .hist-list { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+
+  .hist-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 80px 20px; color: rgba(255,255,255,.2);
+  }
+  .hist-empty svg { width: 72px; height: 72px; opacity: .3; }
+  .hist-empty p { font-size: 15px; }
+  .hist-empty small { font-size: 13px; opacity: .7; }
+
+  .hist-card {
+    display: flex; gap: 14px; align-items: center;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 16px; padding: 14px; cursor: pointer;
+    transition: background .2s;
+    position: relative;
+  }
+  .hist-card:hover { background: rgba(255,255,255,.07); }
+  .hist-thumb {
+    width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex-shrink: 0;
+    background: var(--surface2); border: 1px solid rgba(255,255,255,.06);
+  }
+  .hist-info { flex: 1; min-width: 0; }
+  .hist-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hist-cat { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
+  .hist-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+  .hist-price { font-family: 'Orbitron', sans-serif; color: var(--neon); font-size: 16px; font-weight: 700; }
+  .hist-time { font-size: 11px; color: rgba(255,255,255,.22); }
+  .hist-del {
+    background: none; border: none; color: rgba(255,80,80,.5); cursor: pointer;
+    padding: 6px; border-radius: 8px; flex-shrink: 0;
+    transition: color .2s;
+  }
+  .hist-del:hover { color: var(--red); }
+  .hist-del svg { width: 18px; height: 18px; }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--surface2); color: var(--text); padding: 10px 20px;
+    border-radius: 24px; font-size: 13px; font-weight: 500;
+    border: 1px solid rgba(255,255,255,.1);
+    opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none;
+    white-space: nowrap; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── Placeholder image ── */
+  .no-img {
+    width: 90px; height: 90px; border-radius: 12px;
+    background: var(--surface2); border: 1px solid rgba(255,255,255,.06);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .no-img svg { width: 36px; height: 36px; opacity: .2; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══════════════ CAMERA PAGE ═══════════════ -->
+  <div class="page active" id="page-camera">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas" style="display:none"></canvas>
+
+    <div class="cam-overlay" id="cam-overlay">
+      <div class="vignette"></div>
+      <div class="scan-frame" id="scan-frame">
+        <div class="corner-br"></div>
+        <div class="corner-bl"></div>
+        <div class="scan-line"></div>
+        <div class="scan-ring"></div>
+      </div>
+      <div class="scan-label" id="scan-label">商品にカメラを向けてください</div>
+    </div>
+
+    <div class="cam-header">
+      <span class="logo-text">InstantValue AI</span>
+    </div>
+
+    <div class="shutter-wrap">
+      <button class="shutter" id="shutter-btn" onclick="capture()">
+        <svg viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.5-9H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8.5a2 2 0 0 0-2-2h-1.5l-1.5-2H9L7.5 6.5H4"/></svg>
+        <div class="spinner"></div>
+      </button>
+      <span class="shutter-hint">商品を撮影してスキャン</span>
+    </div>
+
+    <div class="analyze-overlay" id="analyze-overlay">
+      <div class="cube-spinner">
+        <div></div><div></div><div></div>
+        <div></div><div></div><div></div>
+        <div></div><div></div><div></div>
+      </div>
+      <div class="analyze-text">AI が価格を解析中...</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ RESULT PAGE ═══════════════ -->
+  <div class="page" id="page-result">
+    <div class="result-header">
+      <button class="back-btn" onclick="goBack()">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+        戻る
+      </button>
+      <span class="result-title">解析結果</span>
+    </div>
+
+    <div class="result-body">
+      <!-- Product -->
+      <div class="product-header">
+        <div id="result-thumb-wrap"></div>
+        <div class="product-info">
+          <div class="category-badge" id="result-category"></div>
+          <div class="product-name" id="result-name"></div>
+        </div>
+      </div>
+
+      <!-- Price -->
+      <div class="price-card">
+        <div class="price-label">推定売却価格</div>
+        <div class="price-value" id="price-display">¥ 0</div>
+        <div class="price-range" id="price-range"></div>
+      </div>
+
+      <!-- Saved -->
+      <div class="saved-badge" id="saved-badge">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#00e676" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        履歴に保存されました
+      </div>
+
+      <!-- Tags -->
+      <div class="tags" id="result-tags"></div>
+
+      <!-- Description -->
+      <div class="desc-section">
+        <div class="desc-header">
+          <span class="desc-label">出品説明文</span>
+          <button class="copy-btn" onclick="copyDesc()">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            コピー
+          </button>
+        </div>
+        <div class="desc-box" id="result-desc"></div>
+      </div>
+
+      <!-- Export -->
+      <div class="export-section">
+        <div class="export-title">爆速出品</div>
+        <div class="export-grid">
+          <button class="export-btn" onclick="exportTo('mercari')"><span class="export-emoji">🔴</span>メルカリ</button>
+          <button class="export-btn" onclick="exportTo('yahoo')"><span class="export-emoji">🟣</span>ヤフオク</button>
+          <button class="export-btn" onclick="exportTo('rakuma')"><span class="export-emoji">🟢</span>ラクマ</button>
+          <button class="export-btn" onclick="exportTo('ebay')"><span class="export-emoji">🔵</span>eBay</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ HISTORY PAGE ═══════════════ -->
+  <div class="page" id="page-history">
+    <div class="hist-header">
+      <div class="hist-title-wrap">
+        <div class="hist-title">スキャン履歴</div>
+        <div class="hist-count" id="hist-count">0 件</div>
+      </div>
+      <div class="hist-actions">
+        <button class="icon-btn" title="更新" onclick="loadHistory()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
+        <button class="icon-btn" title="全削除" onclick="clearAll()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="hist-list" class="hist-list"></div>
+  </div>
+
+  <!-- ═══════════════ BOTTOM NAV ═══════════════ -->
+  <nav class="nav">
+    <button class="nav-btn active" id="nav-camera" onclick="switchPage('camera')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      スキャン
+    </button>
+    <button class="nav-btn" id="nav-history" onclick="switchPage('history')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      履歴
+    </button>
+  </nav>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let currentItem = null;
+let capturedDataUrl = null;
+let videoStream = null;
+
+// ─── Camera init ─────────────────────────────────────────────────────────────
+async function initCamera() {
+  try {
+    videoStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    document.getElementById('video').srcObject = videoStream;
+  } catch (e) {
+    document.getElementById('scan-label').textContent = 'カメラの許可が必要です';
+    console.error(e);
+  }
+}
+
+// ─── Capture & Analyze ───────────────────────────────────────────────────────
+async function capture() {
+  const btn = document.getElementById('shutter-btn');
+  if (btn.classList.contains('loading')) return;
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+
+  // Snapshot
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  capturedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+  // UI: analyzing state
+  btn.classList.add('loading');
+  document.getElementById('scan-frame').classList.add('scanning');
+  document.getElementById('scan-label').textContent = 'AI 解析中...';
+  document.getElementById('analyze-overlay').classList.add('show');
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: capturedDataUrl })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      showToast('❌ ' + data.error);
+    } else {
+      currentItem = { ...data, image: capturedDataUrl };
+      showResult(currentItem);
+    }
+  } catch (e) {
+    showToast('❌ 通信エラー: ' + e.message);
+  } finally {
+    btn.classList.remove('loading');
+    document.getElementById('scan-frame').classList.remove('scanning');
+    document.getElementById('scan-label').textContent = '商品にカメラを向けてください';
+    document.getElementById('analyze-overlay').classList.remove('show');
+  }
+}
+
+// ─── Show Result ─────────────────────────────────────────────────────────────
+function showResult(item) {
+  // Thumb
+  const thumbWrap = document.getElementById('result-thumb-wrap');
+  if (item.image) {
+    thumbWrap.innerHTML = `<img class="product-thumb" src="${item.image}" alt="">`;
+  } else {
+    thumbWrap.innerHTML = `<div class="no-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
+  }
+
+  document.getElementById('result-category').textContent = item.category || 'その他';
+  document.getElementById('result-name').textContent = item.productName || '';
+  document.getElementById('result-desc').textContent = item.description || '';
+
+  // Tags
+  const tagsEl = document.getElementById('result-tags');
+  tagsEl.innerHTML = (item.tags || []).map(t => `<span class="tag">#${t}</span>`).join('');
+
+  // Price range
+  const min = item.minPrice || 0;
+  const max = item.maxPrice || 0;
+  document.getElementById('price-range').textContent = `¥${fmt(min)} 〜 ¥${fmt(max)}`;
+
+  // Saved badge reset
+  document.getElementById('saved-badge').classList.remove('show');
+
+  // Switch page
+  switchPage('result');
+
+  // Animate price count-up
+  const avg = Math.round((min + max) / 2);
+  animatePrice(avg, () => {
+    document.getElementById('saved-badge').classList.add('show');
+  });
+}
+
+function animatePrice(target, onDone) {
+  const el = document.getElementById('price-display');
+  const duration = 1800;
+  const start = performance.now();
+
+  function ease(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function step(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const val = Math.round(ease(t) * target);
+    el.textContent = '¥ ' + fmt(val);
+    if (t < 1) { requestAnimationFrame(step); }
+    else { el.textContent = '¥ ' + fmt(target); if (onDone) onDone(); }
+  }
+  requestAnimationFrame(step);
+}
+
+// ─── History ─────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  try {
+    const res = await fetch('/api/history');
+    const items = await res.json();
+    renderHistory(items);
+  } catch (e) {
+    showToast('❌ 履歴の読み込みに失敗しました');
+  }
+}
+
+function renderHistory(items) {
+  const list = document.getElementById('hist-list');
+  document.getElementById('hist-count').textContent = `${items.length} 件`;
+
+  if (!items.length) {
+    list.innerHTML = `
+      <div class="hist-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+        </svg>
+        <p>スキャン履歴がありません</p>
+        <small>カメラで商品をスキャンしてみましょう</small>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = items.map(item => {
+    const avg = Math.round((item.minPrice + item.maxPrice) / 2);
+    const thumb = item.image_b64
+      ? `<img class="hist-thumb" src="${item.image_b64}" alt="">`
+      : `<div class="hist-thumb" style="display:flex;align-items:center;justify-content:center"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>`;
+    const timeStr = relativeTime(item.timestamp);
+    return `
+      <div class="hist-card" onclick="openHistItem(${item.id})">
+        ${thumb}
+        <div class="hist-info">
+          <div class="hist-name">${escHtml(item.productName)}</div>
+          <div class="hist-cat">${escHtml(item.category)}</div>
+          <div class="hist-bottom">
+            <span class="hist-price">¥${fmt(avg)}</span>
+            <span class="hist-time">${timeStr}</span>
+          </div>
+        </div>
+        <button class="hist-del" onclick="event.stopPropagation();deleteItem(${item.id})" title="削除">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6M14 11v6"/>
+            <path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+      </div>`;
+  }).join('');
+}
+
+async function openHistItem(id) {
+  try {
+    const res = await fetch('/api/history');
+    const items = await res.json();
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    currentItem = { ...item, image: item.image_b64 };
+    showResult(currentItem);
+  } catch(e) {}
+}
+
+async function deleteItem(id) {
+  await fetch(`/api/history/${id}`, { method: 'DELETE' });
+  showToast('削除しました');
+  loadHistory();
+}
+
+async function clearAll() {
+  if (!confirm('すべての履歴を削除しますか？')) return;
+  await fetch('/api/history', { method: 'DELETE' });
+  showToast('履歴をすべて削除しました');
+  loadHistory();
+}
+
+// ─── Export ──────────────────────────────────────────────────────────────────
+function exportTo(platform) {
+  if (!currentItem) return;
+  const name = currentItem.productName || '';
+  const desc = currentItem.description || '';
+  const tags = (currentItem.tags || []).map(t => '#' + t).join(' ');
+  const clipText = `【${name}】\n\n${desc}\n\n${tags}`;
+
+  navigator.clipboard.writeText(clipText).catch(() => {});
+
+  const encoded = encodeURIComponent(name);
+  let url = '';
+  switch (platform) {
+    case 'mercari': url = `https://jp.mercari.com/sell?ref=instant_value`; break;
+    case 'yahoo':   url = `https://auctions.yahoo.co.jp/sell/jp/show/submit?Title=${encoded}`; break;
+    case 'rakuma':  url = `https://fril.jp/`; break;
+    case 'ebay':    url = `https://www.ebay.com/sell/listing?title=${encoded}`; break;
+  }
+
+  if (url) window.open(url, '_blank');
+  showToast(`説明文をコピーしました — ${platform === 'mercari' ? 'メルカリ' : platform === 'yahoo' ? 'ヤフオク' : platform === 'rakuma' ? 'ラクマ' : 'eBay'}を開きます`);
+}
+
+function copyDesc() {
+  if (!currentItem) return;
+  const text = `【${currentItem.productName}】\n\n${currentItem.description}\n\n${(currentItem.tags||[]).map(t=>'#'+t).join(' ')}`;
+  navigator.clipboard.writeText(text).then(() => showToast('コピーしました ✓'));
+}
+
+// ─── Navigation ──────────────────────────────────────────────────────────────
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+  document.getElementById('page-' + name)?.classList.add('active');
+  const navBtn = document.getElementById('nav-' + name);
+  if (navBtn) navBtn.classList.add('active');
+
+  if (name === 'history') loadHistory();
+}
+
+function goBack() {
+  switchPage('camera');
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function fmt(n) {
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function relativeTime(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'たった今';
+  if (min < 60) return `${min}分前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}時間前`;
+  return new Date(iso).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+initCamera();
+
+// PWA: Service Worker 登録
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
